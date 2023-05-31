@@ -1,0 +1,8 @@
+chadwick_csv/*
+downloads/*
+data/*
+weights_averages/*
+venv/
+*.csv
+__pycache__/
+scratch.py
