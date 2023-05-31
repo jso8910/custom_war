@@ -161,7 +161,7 @@ if __name__ == "__main__":
         "-s",
         help="Start year of data gathering (defaults to 2015 for the first year of statcast data (the lowest that I would use this for))",
         type=int,
-        default=2022,
+        default=2015,
     )
     parser.add_argument(
         "--end-year",
