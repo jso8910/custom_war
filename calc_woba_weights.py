@@ -1,12 +1,13 @@
 import tqdm
-import pandas as pd
+import dask.dataframe as dd
 import argparse
 import sys
 import os
 import json
+from config import end_data_year, start_data_year
 
 
-def calc_woba_weights(plays: pd.DataFrame):
+def calc_woba_weights(plays):  # type: ignore
     run_exp_by_sit = [
         # ["Outs", "Runner state", "RUNS", "COUNT", "AVG"],
         [n % 3, n // 3, 0, 0, 0.0]
@@ -136,23 +137,23 @@ def main(start_year: int, end_year: int):
     if start_year > end_year:
         print("START_YEAR must be less than END_YEAR", file=sys.stderr)
         sys.exit(1)
-    elif start_year < 1915 or end_year > 2022:
+    elif start_year < start_data_year or end_year > end_data_year:
         print(
-            "START_YEAR and END_YEAR must be between 1915 and 2022. If 2023 or a future year has been added to retrosheet, feel free to edit this file.",
+            f"START_YEAR and END_YEAR must be between {start_data_year} and {end_data_year}. If {end_data_year + 1} or a future year has been added to retrosheet, feel free to edit this file.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    if not os.path.isdir("chadwick_csv"):
+    if not os.path.isdir("data/chadwick"):
         print(
-            "The folder chadwick_csv doesn't exist. Have you run retrosheet_to_csv.sh?",
+            "The folder data/chadwick doesn't exist. Have you run retrosheet_to_csv.sh?",
             file=sys.stderr,
         )
         sys.exit(1)
-    files = sorted(os.listdir("chadwick_csv"))
+    files = sorted(os.listdir("data/chadwick"))
     if not len(files):
         print(
-            "The folder chadwick_csv doesn't have any folders. Have you run retrosheet_to_csv.sh?",
+            "The folder data/chadwick doesn't have any files. Have you run retrosheet_to_csv.sh?",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -170,9 +171,9 @@ def main(start_year: int, end_year: int):
             continue
         file = "chadwick_csv/" + file  # type: ignore
         with open(file, "r") as f:  # type: ignore
-            reader = pd.read_csv(f)  # type: ignore
+            reader = dd.read_csv(f)  # type: ignore
             years.append(reader)  # type: ignore
-    plays = pd.concat(years)  # type: ignore
+    plays = dd.concat(years)  # type: ignore
     linear_weights = calc_woba_weights(plays)
     with open("weights_averages/woba_weights.json", "w") as f:
         json.dump(linear_weights, f)
@@ -183,16 +184,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--start-year",
         "-s",
-        help="Start year of data gathering (defaults to 2015 for the first year of statcast data (the lowest that I would use this for))",
+        help=f"Start year of data gathering (defaults to {start_data_year} for the first year of statcast data)",
         type=int,
-        default=2015,
+        default=start_data_year,
     )
     parser.add_argument(
         "--end-year",
         "-e",
-        help="End year of data gathering (defaults to 2022, current retrosheet year as of coding)",
+        help=f"End year of data gathering (defaults to {end_data_year}, current retrosheet year as of coding)",
         type=int,
-        default=2022,
+        default=end_data_year,
     )
 
     args = parser.parse_args(sys.argv[1:])

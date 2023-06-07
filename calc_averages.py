@@ -1,13 +1,42 @@
 import tqdm
+from collections import defaultdict
+import dask.dataframe as dd
 import pandas as pd
 import argparse
 import sys
 import os
-import json
+from config import start_data_year, end_data_year
+
+df_columns = [
+    "year",
+    "PA",
+    "AB",
+    "1B",
+    "2B",
+    "3B",
+    "HR",
+    "UBB",
+    "IBB",
+    "HBP",
+    "SF",
+    "SH",
+    "K",
+    "SB",
+    "CS",
+    "PK",
+    "WP",
+    "PB",
+    "BK",
+    "INT",
+    "E",
+    "FC",
+    "R",
+]
 
 
-def calc_average(plays: pd.DataFrame):
+def calc_average(plays):  # type: ignore
     totals: dict[str, int] = {
+        "year": "",  # type: ignore
         "PA": 0,  # Plate appearance
         "AB": 0,  # At bat
         "1B": 0,  # Single
@@ -54,9 +83,7 @@ def calc_average(plays: pd.DataFrame):
     }
 
     baserunning_outcomes_not_pa: list[int] = [4, 5, 6, 7, 8, 9, 10, 11, 12]
-    # baserunning_outcomes: list[int] = [4, 5, 6, 7, 8, 9, 10, 12]
 
-    # If 39 or 40 (SH_FL or SF_FL, sacrifice hit flag, sacrifice fly flag) are set to "T" (yes it's a string), then it's not an AB
     for _, row in tqdm.tqdm(plays.iterrows(), total=plays.shape[0]):  # type: ignore
         if row["EVENT_CD"] not in baserunning_outcomes_not_pa and row["EVENT_CD"] != 13:
             totals["PA"] += 1
@@ -96,35 +123,37 @@ def calc_average(plays: pd.DataFrame):
 
         if row["EVENT_CD"] in fields:
             totals[fields[row["EVENT_CD"]]] += 1  # type: ignore
-    per_600_pa: dict[str, float] = totals.copy()  # type: ignore
+    per_600_pa: dict[str, float | str] = totals.copy()  # type: ignore
     scaling = 600 / totals["PA"]
     for field in per_600_pa:
+        if field == "year":
+            continue
         per_600_pa[field] = totals[field] * scaling
 
-    return totals, per_600_pa
+    return totals, per_600_pa  # type: ignore
 
 
 def main(start_year: int, end_year: int):
     if start_year > end_year:
         print("START_YEAR must be less than END_YEAR", file=sys.stderr)
         sys.exit(1)
-    elif start_year < 1915 or end_year > 2022:
+    elif start_year < start_data_year or end_year > end_data_year:
         print(
-            "START_YEAR and END_YEAR must be between 1915 and 2022. If 2023 or a future year has been added to retrosheet, feel free to edit this file.",
+            f"START_YEAR and END_YEAR must be between {start_data_year} and {end_data_year}. If {end_data_year + 1} or a future year has been added to retrosheet, feel free to edit this file.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    if not os.path.isdir("chadwick_csv"):
+    if not os.path.isdir("data/chadwick"):
         print(
-            "The folder chadwick_csv doesn't exist. Have you run retrosheet_to_csv.sh?",
+            "The folder data/chadwick doesn't exist. Have you run retrosheet_to_csv.sh?",
             file=sys.stderr,
         )
         sys.exit(1)
-    files = sorted(os.listdir("chadwick_csv"))
+    files = sorted(os.listdir("data/chadwick"))
     if not len(files):
         print(
-            "The folder chadwick_csv doesn't have any folders. Have you run retrosheet_to_csv.sh?",
+            "The folder data/chadwick doesn't have any files. Have you run retrosheet_to_csv.sh?",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -136,22 +165,45 @@ def main(start_year: int, end_year: int):
         else:
             files_filtered.append(file)  # type: ignore
     # plays = pd.DataFrame()  # type: ignore
-    years = []
+    years: dict[int, list[dd.DataFrame]] = defaultdict(list)  # type: ignore
 
     for idx, file in enumerate(tqdm.tqdm(files_filtered)):  # type: ignore
         if int(file[0:4]) < start_year or int(file[0:4]) > end_year:  # type: ignore
             continue
-        file = "chadwick_csv/" + file  # type: ignore
-        with open(file, "r") as f:  # type: ignore
-            reader = pd.read_csv(f)  # type: ignore
-            years.append(reader)  # type: ignore
-    plays = pd.concat(years)  # type: ignore
-    totals, per_600_pa = calc_average(plays)
-    with open("weights_averages/total_mlb_stats.json", "w") as f:
-        json.dump(totals, f)
+        file_name = "data/chadwick/" + file  # type: ignore
+        with open(file_name, "r") as f:  # type: ignore
+            reader = dd.read_csv(f)  # type: ignore
+            years[int(file[0:4])].append(reader)  # type: ignore
+    years = {year: dd.concat(readers) for year, readers in years.items()}  # type: ignore
+    # totals_by_year, per_600_pa_by_year = {}, {}
+    totals_by_year, per_600_pa_by_year = dd.from_pandas(  # type: ignore
+        pd.DataFrame(columns=df_columns)
+    ), dd.from_pandas(  # type: ignore
+        pd.DataFrame(columns=df_columns)
+    )
+    for year in range(start_year, end_year + 1):  # type: ignore
+        totals, per_600_pa = calc_average(years[year])  # type: ignore
+        totals["year"] = year  # type: ignore
+        per_600_pa["year"] = year
+        totals_by_year = dd.concat([totals_by_year, dd.from_pandas(pd.DataFrame([totals]))], ignore_index=True)  # type: ignore
+        per_600_pa_by_year = dd.concat([per_600_pa_by_year, dd.from_pandas(pd.DataFrame([per_600_pa]))], ignore_index=True)  # type: ignore
 
-    with open("weights_averages/average_mlb_stats_per_600.json", "w") as f:
-        json.dump(per_600_pa, f)
+    totals, per_600_pa = calc_average(pd.concat(years.values()))  # type: ignore
+    totals["year"] = "totals"  # type: ignore
+    per_600_pa["year"] = "totals"
+    totals_by_year = dd.concat([totals_by_year, dd.from_pandas(pd.DataFrame([totals]))], ignore_index=True)  # type: ignore
+    per_600_pa_by_year = dd.concat([per_600_pa_by_year, dd.from_pandas(pd.DataFrame([per_600_pa]))], ignore_index=True)  # type: ignore
+
+    totals_by_year.to_csv("weights_averages/total_mlb_stats.csv", index=False)  # type: ignore
+    per_600_pa_by_year.to_csv(  # type: ignore
+        "weights_averages/average_mlb_stats_per_600.csv", index=False
+    )
+
+    # with open("weights_averages/total_mlb_stats.json", "w") as f:
+    #     json.dump(totals_by_year, f)
+
+    # with open("weights_averages/average_mlb_stats_per_600.json", "w") as f:
+    #     json.dump(per_600_pa_by_year, f)
 
 
 if __name__ == "__main__":
@@ -159,16 +211,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--start-year",
         "-s",
-        help="Start year of data gathering (defaults to 2015 for the first year of statcast data (the lowest that I would use this for))",
+        help=f"Start year of data gathering (defaults to {start_data_year} for the first year of statcast data)",
         type=int,
-        default=2015,
+        default=start_data_year,
     )
     parser.add_argument(
         "--end-year",
         "-e",
-        help="End year of data gathering (defaults to 2022, current retrosheet year as of coding)",
+        help=f"End year of data gathering (defaults to {end_data_year}, current retrosheet year as of coding)",
         type=int,
-        default=2022,
+        default=end_data_year,
     )
 
     args = parser.parse_args(sys.argv[1:])

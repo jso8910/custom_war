@@ -14,7 +14,7 @@ import requests
 
 
 def download_games():
-    os.makedirs("downloads", exist_ok=True)
+    os.makedirs("downloads/retrosheet", exist_ok=True)
     decade_zips = [
         "https://www.retrosheet.org/events/1910seve.zip",
         "https://www.retrosheet.org/events/1920seve.zip",
@@ -33,7 +33,7 @@ def download_games():
     for url in tqdm.tqdm(decade_zips, desc=" Files downloading"):
         request = requests.get(url)
         zip = zipfile.ZipFile(BytesIO(request.content))
-        zip.extractall("downloads")
+        zip.extractall("downloads/retrosheet")
 
 
 download_games()
